@@ -1202,7 +1202,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
     }
     exportButton.addEventListener("click", () => {
       const report = getReport();
-      const headers = ["月份", "員工序號", "考勤號碼", "姓名", "日期", "星期", "班別", "狀態", "班別起始", "班別結束", "上班1", "下班1", "上班2", "下班2", "合計小時", "加班時數", "月加班累計", "備註"];
+      const headers = ["日期", "星期", "班別", "狀態", "班別起始", "班別結束", "上班1", "下班1", "上班2", "下班2", "合計小時", "加班時數", "月加班累計", "備註"];
       
       const headerStyle = {
         font: { bold: true, color: { rgb: "FFFFFF" } },
@@ -1213,6 +1213,10 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const normalStyle = {
         border: thinBorder(),
         alignment: { vertical: "center" }
+      };
+      const infoStyle = {
+        font: { bold: true, color: { rgb: "1F2937" } },
+        alignment: { horizontal: "left", vertical: "center", wrapText: true }
       };
       const redStyle = {
         ...normalStyle,
@@ -1238,16 +1242,18 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const usedSheetNames = new Set();
 
       report.people.forEach((person) => {
-        const rows = [headers];
-        const styles = [headers.map(() => headerStyle)];
+        const infoRow = new Array(headers.length).fill("");
+        infoRow[0] = `月份：${monthSelect.value}`;
+        infoRow[2] = `員工序號：${person.employeeNo || ""}`;
+        infoRow[4] = `考勤號碼：${person.attendanceNo || ""}`;
+        infoRow[6] = `姓名：${person.name}`;
+        const infoRowHeight = Math.max(30, Math.ceil(String(person.name || "").length / 18) * 15 + 8);
+        const rows = [infoRow, headers];
+        const styles = [headers.map(() => infoStyle), headers.map(() => headerStyle)];
 
         person.days.forEach((day) => {
           const overLimitAfterThisDay = day.cumulativeOvertime > report.overtimeLimit;
           rows.push([
-            monthSelect.value,
-            person.employeeNo,
-            person.attendanceNo,
-            person.name,
             formatDate(day.date),
             `星期${weekdays[day.date.getDay()]}`,
             day.shift?.name || "",
@@ -1265,14 +1271,14 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           ]);
 
           styles.push(headers.map((_, columnIndex) => {
-            if (columnIndex === 7) {
+            if (columnIndex === 3) {
               if (day.absent) return warnStyle;
               if (day.holidayOvertime || day.weekendOvertime || day.short || overLimitAfterThisDay) return redStyle;
               return okStyle;
             }
             if (day.absent) return absentStyle;
-            if (day.short && [14, 15, 16, 17].includes(columnIndex)) return redStyle;
-            if (overLimitAfterThisDay && [15, 16, 17].includes(columnIndex)) return redStyle;
+            if (day.short && [10, 11, 12, 13].includes(columnIndex)) return redStyle;
+            if (overLimitAfterThisDay && [11, 12, 13].includes(columnIndex)) return redStyle;
             return normalStyle;
           }));
         });
@@ -1283,14 +1289,20 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           const cell = XLSX.utils.decode_cell(address);
           worksheet[address].s = styles[cell.r]?.[cell.c] || normalStyle;
         });
+        worksheet["!merges"] = [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+          { s: { r: 0, c: 2 }, e: { r: 0, c: 3 } },
+          { s: { r: 0, c: 4 }, e: { r: 0, c: 5 } },
+          { s: { r: 0, c: 6 }, e: { r: 0, c: 7 } }
+        ];
 
         worksheet["!cols"] = [
-          { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
-          { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+          { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
           { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-          { wch: 10 }, { wch: 10 }, { wch: 28 }
+          { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 28 }
         ];
-        worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+        worksheet["!rows"] = [{ hpt: infoRowHeight }, { hpt: 22 }];
+        worksheet["!freeze"] = { xSplit: 0, ySplit: 2 };
 
         // 決定工作表名稱 (防範重複、長度上限及非法字元)
         let sheetName = person.name.replace(/[\\/*?[\]]/g, "");
@@ -1323,7 +1335,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = `HR月結考勤檢核_${monthSelect.value}.xlsx`;
+      a.download = `HR月結考勤檢核_正常報表_B表_${monthSelect.value}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1345,10 +1357,26 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
     }
     function getInspectionStartTime(day) {
       if (day.absent) return "";
-      const actualStart = parseClockMinutes(day.start1);
+      return day.start1 || "";
+    }
+
+    function getInspectionStatus(day, inspectionStart, inspectionEnd) {
+      if (!inspectionStart && !inspectionEnd) {
+        if (day.holiday) return day.holiday.type === "typhoon" ? "颱風假" : "國定假日";
+        if (day.absent || (day.date && [0, 6].includes(day.date.getDay()))) return "未上班 / 休假";
+        return "上下班未打卡";
+      }
+      if (day.absent) return "未上班 / 休假";
+      if (!inspectionStart) return "上班未打卡";
+      if (!inspectionEnd) return "下班未打卡";
       const shiftStart = parseClockMinutes(day.shift?.start);
-      if (actualStart === null && shiftStart === null) return "";
-      return formatClockMinutes(Math.max(actualStart ?? shiftStart, shiftStart ?? actualStart));
+      const shiftEnd = parseClockMinutes(day.shift?.end);
+      const late = shiftStart !== null && parseClockMinutes(inspectionStart) > shiftStart;
+      const early = shiftEnd !== null && parseClockMinutes(inspectionEnd) < shiftEnd;
+      if (late && early) return "遲到／早退";
+      if (late) return "遲到";
+      if (early) return "早退";
+      return "正常";
     }
 
     function getAdjustedInspectionEnd(day) {
@@ -1360,9 +1388,10 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
 
     complianceButton.addEventListener("click", () => {
       const report = getReport();
-      const headers = ["月份", "員工序號", "考勤號碼", "姓名", "日期", "星期", "班別", "班別起始", "班別結束", "上班檢核", "下班檢核", "合計小時檢核", "加班時數檢核", "月加班累計檢核", "狀態", "上班1", "下班1", "上班2", "下班2", "合計小時", "加班時數", "月加班累計", "備註"];
+      const headers = ["日期", "星期", "班別", "狀態檢核", "班別起始", "班別結束", "上班檢核", "下班檢核", "上班2檢核", "下班2檢核", "合計小時檢核", "加班時數檢核", "月加班累計檢核", "備註", "狀態", "上班1", "下班1", "上班2", "下班2", "合計小時", "加班時數", "月加班累計", "備註2"];
       const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "2458A6" } }, alignment: { horizontal: "center", vertical: "center" }, border: thinBorder() };
       const normalStyle = { border: thinBorder(), alignment: { vertical: "center" } };
+      const infoStyle = { font: { bold: true, color: { rgb: "1F2937" } }, alignment: { horizontal: "left", vertical: "center", wrapText: true } };
       const redStyle = { ...normalStyle, font: { color: { rgb: "C62828" }, bold: true } };
       const warnStyle = { ...normalStyle, font: { color: { rgb: "B26A00" }, bold: true }, fill: { fgColor: { rgb: "FFF4D6" } } };
       const okStyle = { ...normalStyle, font: { color: { rgb: "2E7D32" }, bold: true }, fill: { fgColor: { rgb: "EAF6EC" } } };
@@ -1373,8 +1402,14 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       report.people.forEach((person) => {
         let inspectionCumulative = 0;
         let adjustmentStarted = false;
-        const rows = [headers];
-        const styles = [headers.map(() => headerStyle)];
+        const infoRow = new Array(headers.length).fill("");
+        infoRow[0] = `月份：${monthSelect.value}`;
+        infoRow[2] = `員工序號：${person.employeeNo || ""}`;
+        infoRow[4] = `考勤號碼：${person.attendanceNo || ""}`;
+        infoRow[6] = `姓名：${person.name}`;
+        const infoRowHeight = Math.max(30, Math.ceil(String(person.name || "").length / 18) * 15 + 8);
+        const rows = [infoRow, headers];
+        const styles = [headers.map(() => infoStyle), headers.map(() => headerStyle)];
         person.days.forEach((day) => {
           const isRestDay = day.weekendOvertime || day.holidayOvertime;
           if (day.cumulativeOvertime > report.overtimeLimit) adjustmentStarted = true;
@@ -1382,26 +1417,31 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           const inspectionStart = adjustOvertime && isRestDay ? "" : getInspectionStartTime(day);
           const actualEnd = day.end2 || day.end1 || "";
           const inspectionEnd = day.absent || (adjustOvertime && isRestDay) ? "" : (adjustOvertime ? getAdjustedInspectionEnd(day) : actualEnd);
+          const noInspectionTime = !inspectionStart && !inspectionEnd;
           const checkOvertime = day.absent || adjustOvertime ? 0 : day.overtimeHours;
           if (!day.absent && !adjustOvertime) inspectionCumulative += day.overtimeHours;
-          const startMinutes = parseClockMinutes(inspectionStart);
-          const endMinutes = parseClockMinutes(inspectionEnd);
-          const checkTotal = day.absent || (adjustOvertime && isRestDay) ? "" : adjustOvertime && startMinutes !== null && endMinutes !== null
-            ? formatHours(Math.max(0, endMinutes - startMinutes) / 60)
-            : formatHours(day.totalHours);
+          const adjustedEndKey = day.end2 ? "end2" : "end1";
+          const adjustedDay = adjustOvertime ? { ...day, [adjustedEndKey]: inspectionEnd } : day;
+          const checkTotal = day.absent || (adjustOvertime && isRestDay)
+            ? ""
+            : formatHours(adjustOvertime ? calculateShiftTotalHours(adjustedDay, day.shift) : day.totalHours);
+          const inspectionStatus = getInspectionStatus(day, inspectionStart, inspectionEnd);
           const note = (day.note || "") + (adjustOvertime ? (isRestDay ? "；超過月加班上限，週末／假日排班建議不列入" : "；超過月加班上限，排班建議已扣除當日加班時數") : "");
           const checkDay = { ...day, cumulativeOvertime: inspectionCumulative, overtimeHours: checkOvertime };
           rows.push([
-            monthSelect.value, person.employeeNo, person.attendanceNo, person.name,
             formatDate(day.date), `星期${weekdays[day.date.getDay()]}`, day.shift?.name || "",
+            inspectionStatus,
             inspectionStart ? day.shift?.start || "" : "", inspectionStart ? day.shift?.end || "" : "",
-            inspectionStart, inspectionEnd, checkTotal, checkOvertime ? formatHours(checkOvertime) : "", inspectionCumulative ? formatHours(inspectionCumulative) : "",
+            inspectionStart, inspectionEnd, day.start2 || "", day.end2 || "",
+            checkTotal, checkOvertime ? formatHours(checkOvertime) : "", inspectionCumulative ? formatHours(inspectionCumulative) : "",
+            "",
             getReportDayStatus(checkDay, report.overtimeLimit),
             day.start1 || "", day.end1 || "", day.start2 || "", day.end2 || "",
             day.absent ? "" : formatHours(day.totalHours), day.overtimeHours ? formatHours(day.overtimeHours) : "",
             day.cumulativeOvertime ? formatHours(day.cumulativeOvertime) : "", note
           ]);
           styles.push(headers.map((_, columnIndex) => {
+            if (noInspectionTime) return absentStyle;
             if (columnIndex === 14) {
               if (day.absent) return warnStyle;
               if (day.holidayOvertime || day.weekendOvertime || day.short || adjustOvertime) return redStyle;
@@ -1418,15 +1458,22 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           const cell = XLSX.utils.decode_cell(address);
           worksheet[address].s = styles[cell.r]?.[cell.c] || normalStyle;
         });
-        worksheet["!cols"] = [
-          { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
-          { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
-          { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 10 },
-          { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-          { wch: 10 }, { wch: 36 }
+        worksheet["!merges"] = [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+          { s: { r: 0, c: 2 }, e: { r: 0, c: 3 } },
+          { s: { r: 0, c: 4 }, e: { r: 0, c: 5 } },
+          { s: { r: 0, c: 6 }, e: { r: 0, c: 7 } }
         ];
-        worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
-        let sheetName = (person.name + "_B表").replace(/[\\/*?[\]]/g, "");
+        worksheet["!cols"] = [
+          { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 14 }, { wch: 10 },
+          { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+          { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 10 }, { wch: 10 },
+          { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+          { wch: 10 }, { wch: 10 }, { wch: 36 }
+        ];
+        worksheet["!rows"] = [{ hpt: infoRowHeight }, { hpt: 22 }];
+        worksheet["!freeze"] = { xSplit: 0, ySplit: 2 };
+        let sheetName = (person.name + "_A表").replace(/[\\/*?[\]]/g, "");
         if (sheetName.length > 31) sheetName = sheetName.slice(0, 31);
         let finalSheetName = sheetName;
         let suffix = 1;
@@ -1442,7 +1489,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const blobUrl = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `HR月結考勤檢核_B表_${monthSelect.value}.xlsx`;
+      link.download = `HR月結考勤檢核_符合勞檢_A表_${monthSelect.value}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
