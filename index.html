@@ -1489,7 +1489,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const blobUrl = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `HR月結考勤檢核_符合勞檢_A表_${monthSelect.value}.xlsx`;
+      link.download = `HR月結考勤檢核_A表_${monthSelect.value}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
