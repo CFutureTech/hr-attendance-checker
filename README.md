@@ -2,6 +2,8 @@
 
 這是一個可直接用瀏覽器開啟的 HR 考勤月結檢核網頁工具。
 
+目前可使用網址：[https://hrdemo.createfuture.com.tw/](https://hrdemo.createfuture.com.tw/)。若後續專案移轉組織、改名或調整部署位置，請同步更新此連結。
+
 ## 主要功能
 
 - 匯入 Excel / CSV 考勤資料
@@ -46,4 +48,3 @@
 ## 注意事項
 
 目前網頁使用線上 Excel 套件，電腦需要能連網載入套件後，才能匯入與匯出 Excel。
-
