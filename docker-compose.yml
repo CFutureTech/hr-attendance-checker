@@ -1,0 +1,11 @@
+services:
+  hr-attendance-report:
+    build: .
+    image: hr-attendance-report:production
+    container_name: hr-attendance-report
+    restart: always
+    ports:
+      - "${APP_PORT:-8888}:80"
+    environment:
+      NGINX_PORT: "80"
+      TZ: "${TZ:-Asia/Taipei}"

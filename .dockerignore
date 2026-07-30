@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.before-*
+*.xlsx
+*.xls
+*.ods
+*.csv
+*.bat
+*.md
+*.jpg
+仙暉 HR 月結考勤檢核.html
+仙暉 HR 月結考勤檢核_files/
