@@ -1,5 +1,5 @@
 # HR 月結考勤檢核系統
-
+https://hrdemo.createfuture.com.tw/
 這是一個可直接用瀏覽器開啟的 HR 考勤月結檢核網頁工具。
 
 ## 主要功能
