@@ -579,7 +579,7 @@
 
     addShiftButton.addEventListener("click", () => {
       shifts.push({ name: "班別" + (shifts.length + 1), start: "08:00", end: "17:00" });
-      localStorage.setItem("hr-shifts", JSON.stringify(shifts));
+      persistShifts();
       renderShiftSettings();
       render();
     });
@@ -615,6 +615,7 @@
     let rawRows = [];
     let selectedEmployeeKey = "";
     let shiftOverrides = JSON.parse(localStorage.getItem("hr-shift-overrides") || "{}");
+    const SHIFT_STORAGE_KEY = "hr-shifts";
     const defaultShifts = [
       { name: "A班", start: "08:00", end: "16:00" },
       { name: "正常班", start: "08:00", end: "17:30" }
@@ -698,10 +699,29 @@
 
     renderHolidaySettings();
 
+    function normalizeShiftList(value) {
+      if (!Array.isArray(value)) return [];
+      return value.map((shift) => {
+        const name = String(shift?.name || "").trim();
+        if (!name) return null;
+        const start = /^\d{2}:\d{2}$/.test(String(shift.start || "")) ? shift.start : "08:00";
+        const end = /^\d{2}:\d{2}$/.test(String(shift.end || "")) ? shift.end : "17:00";
+        return { name, start, end };
+      }).filter(Boolean);
+    }
+
+    function persistShifts() {
+      try {
+        localStorage.setItem(SHIFT_STORAGE_KEY, JSON.stringify(shifts));
+      } catch (error) {
+        console.warn("班別設定儲存失敗", error);
+      }
+    }
+
     function loadShifts() {
       try {
-        const saved = JSON.parse(localStorage.getItem("hr-shifts") || "null");
-        if (Array.isArray(saved) && saved.length) return saved;
+        const saved = normalizeShiftList(JSON.parse(localStorage.getItem(SHIFT_STORAGE_KEY) || "null"));
+        if (saved.length) return saved;
       } catch (error) {
         console.warn("班別設定讀取失敗", error);
       }
@@ -709,12 +729,12 @@
     }
 
     function saveShifts() {
-      shifts = Array.from(document.querySelectorAll(".shift-row")).map((row) => ({
+      shifts = normalizeShiftList(Array.from(document.querySelectorAll(".shift-row")).map((row) => ({
         name: row.querySelector("[data-field=name]").value.trim() || "未命名班別",
         start: row.querySelector("[data-field=start]").value || "08:00",
         end: row.querySelector("[data-field=end]").value || "17:00"
-      }));
-      localStorage.setItem("hr-shifts", JSON.stringify(shifts));
+      })));
+      persistShifts();
       render();
     }
 
@@ -728,11 +748,14 @@
           '<button class="button" type="button" data-remove-shift="' + index + '">刪除</button>' +
           '</div>';
       }).join("");
-      shiftSettingsBody.querySelectorAll("input").forEach((input) => input.addEventListener("change", saveShifts));
+      shiftSettingsBody.querySelectorAll("input").forEach((input) => {
+        input.addEventListener("input", saveShifts);
+        input.addEventListener("change", saveShifts);
+      });
       shiftSettingsBody.querySelectorAll("[data-remove-shift]").forEach((button) => button.addEventListener("click", () => {
         if (shifts.length <= 1) return;
         shifts.splice(Number(button.dataset.removeShift), 1);
-        localStorage.setItem("hr-shifts", JSON.stringify(shifts));
+        persistShifts();
         renderShiftSettings();
         render();
       }));
@@ -865,6 +888,12 @@
       });
       return hasTimePair ? total : Number(row.totalHours || 0);
     }
+
+    function hasMissingEndPunch(row) {
+      if (!row) return false;
+      return Boolean((row.start1 && !row.end1) || (row.start2 && !row.end2));
+    }
+
     function applyOvertimeRule(value) {
       const hours = Number(value || 0);
       return floorOvertimeCheckbox.checked ? Math.floor(hours) : hours;
@@ -945,10 +974,28 @@
         const days = datesInMonth(month).map((date) => {
           const found = byDate.get(formatDate(date));
           const shift = getShiftForDay(person, date);
-          const countedTotalHours = found ? calculateShiftTotalHours(found, shift) : 0;
+          const missingEndPunch = hasMissingEndPunch(found);
+          const countedTotalHours = found && !missingEndPunch ? calculateShiftTotalHours(found, shift) : 0;
           const weekend = [0, 6].includes(date.getDay());
           const holiday = getHolidayForDate(date);
           const holidayOvertime = Boolean(holiday);
+          if (missingEndPunch) {
+            return {
+              ...found,
+              date,
+              shift,
+              absent: false,
+              missingEndPunch: true,
+              short: false,
+              weekendOvertime: false,
+              holidayOvertime: false,
+              holiday,
+              totalHours: 0,
+              overtimeHours: 0,
+              cumulativeOvertime,
+              note: "下班未打卡"
+            };
+          }
           // 如果沒有找到該日資料，或者總工時 (totalHours) 為 0，則判定為未上班/休假
           if (!found || countedTotalHours === 0) {
             return {
@@ -978,6 +1025,7 @@
             holiday,
             overtimeHours,
             absent: false,
+            missingEndPunch: false,
             short,
             cumulativeOvertime,
             note: holidayOvertime ? holiday.name + "出勤全數計加班" : weekendOvertime ? "週末出勤全數計加班" : short ? "未滿 " + formatHours(shiftHours(shift)) + " 小時" : ""
@@ -995,6 +1043,10 @@
       }).sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
 
       return { people, overtimeLimit };
+    }
+
+    function formatDayTotalHours(day) {
+      return day.absent || day.missingEndPunch ? "" : formatHours(day.totalHours);
     }
 
     function updateMonthOptions() {
@@ -1074,9 +1126,9 @@
       monthOvertimeBadge.className = `badge ${person.overLimit ? "danger" : "ok"}`;
 
       detailBody.innerHTML = person.days.map((day) => {
-        const status = day.absent ? (day.holiday ? (day.holiday.type === "typhoon" ? "颱風假" : "國定假日") : "未上班 / 休假") : day.holidayOvertime ? (day.holiday?.type === "typhoon" ? "颱風假加班" : "國定假日加班") : day.weekendOvertime ? "週末加班" : day.short ? "未滿時數" : "正常";
-        const statusClass = day.absent ? "warn" : day.holidayOvertime || day.weekendOvertime || day.short ? "danger" : "ok";
-        const rowClass = [day.absent ? "absent" : "", day.short ? "short" : "", day.overtimeHours > 0 ? "overtime" : "", day.cumulativeOvertime > overtimeLimit ? "over-limit" : ""].join(" ");
+        const status = day.missingEndPunch ? "下班未打卡" : day.absent ? (day.holiday ? (day.holiday.type === "typhoon" ? "颱風假" : "國定假日") : "未上班 / 休假") : day.holidayOvertime ? (day.holiday?.type === "typhoon" ? "颱風假加班" : "國定假日加班") : day.weekendOvertime ? "週末加班" : day.short ? "未滿時數" : "正常";
+        const statusClass = day.missingEndPunch ? "danger" : day.absent ? "warn" : day.holidayOvertime || day.weekendOvertime || day.short ? "danger" : "ok";
+        const rowClass = [day.missingEndPunch ? "missing-end" : "", day.absent ? "absent" : "", day.short ? "short" : "", day.overtimeHours > 0 ? "overtime" : "", day.cumulativeOvertime > overtimeLimit ? "over-limit" : ""].join(" ");
         return `
           <tr class="${rowClass}">
             <td>${formatDate(day.date)}</td>
@@ -1086,7 +1138,7 @@
             <td>${escapeHtml(day.end1 || "")}</td>
             <td>${escapeHtml(day.start2 || "")}</td>
             <td>${escapeHtml(day.end2 || "")}</td>
-            <td class="hours">${day.absent ? "" : formatHours(day.totalHours)}</td>
+            <td class="hours">${formatDayTotalHours(day)}</td>
             <td class="overtime-cell">${day.overtimeHours ? formatHours(day.overtimeHours) : ""}</td>
             <td class="cumulative-cell">${day.cumulativeOvertime ? formatHours(day.cumulativeOvertime) : ""}</td>
             <td class="note-cell">${escapeHtml(day.note || "")}${day.cumulativeOvertime > overtimeLimit ? "，月加班已超過上限" : ""}</td>
@@ -1195,6 +1247,8 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const overLimit = day.cumulativeOvertime > overtimeLimit;
       const baseStatus = day.absent
         ? (day.holiday ? (day.holiday.type === "typhoon" ? "颱風假" : "國定假日") : "未上班 / 休假")
+        : day.missingEndPunch
+          ? "下班未打卡"
         : day.holidayOvertime
           ? (day.holiday?.type === "typhoon" ? "颱風假加班" : "國定假日加班")
           : day.weekendOvertime ? "週末加班" : day.short ? "未滿時數" : "正常";
@@ -1264,7 +1318,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
             day.end1 || "",
             day.start2 || "",
             day.end2 || "",
-            day.absent ? "" : formatHours(day.totalHours),
+            formatDayTotalHours(day),
             day.overtimeHours ? formatHours(day.overtimeHours) : "",
             day.cumulativeOvertime ? formatHours(day.cumulativeOvertime) : "",
             `${day.note || ""}${overLimitAfterThisDay ? "，月加班已超過上限" : ""}`
@@ -1273,7 +1327,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           styles.push(headers.map((_, columnIndex) => {
             if (columnIndex === 3) {
               if (day.absent) return warnStyle;
-              if (day.holidayOvertime || day.weekendOvertime || day.short || overLimitAfterThisDay) return redStyle;
+              if (day.missingEndPunch || day.holidayOvertime || day.weekendOvertime || day.short || overLimitAfterThisDay) return redStyle;
               return okStyle;
             }
             if (day.absent) return absentStyle;
@@ -1406,7 +1460,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
         infoRow[0] = `月份：${monthSelect.value}`;
         infoRow[2] = `員工序號：${person.employeeNo || ""}`;
         infoRow[4] = `考勤號碼：${person.attendanceNo || ""}`;
-        infoRow[6] = `姓名：${person.name}`;
+        infoRow[6] = `姓名：${person.name}${person.overLimit ? "." : ""}`;
         const infoRowHeight = Math.max(30, Math.ceil(String(person.name || "").length / 18) * 15 + 8);
         const rows = [infoRow, headers];
         const styles = [headers.map(() => infoStyle), headers.map(() => headerStyle)];
@@ -1422,7 +1476,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           if (!day.absent && !adjustOvertime) inspectionCumulative += day.overtimeHours;
           const adjustedEndKey = day.end2 ? "end2" : "end1";
           const adjustedDay = adjustOvertime ? { ...day, [adjustedEndKey]: inspectionEnd } : day;
-          const checkTotal = day.absent || (adjustOvertime && isRestDay)
+          const checkTotal = day.absent || day.missingEndPunch || (adjustOvertime && isRestDay)
             ? ""
             : formatHours(adjustOvertime ? calculateShiftTotalHours(adjustedDay, day.shift) : day.totalHours);
           const inspectionStatus = getInspectionStatus(day, inspectionStart, inspectionEnd);
@@ -1437,14 +1491,14 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
             "",
             getReportDayStatus(checkDay, report.overtimeLimit),
             day.start1 || "", day.end1 || "", day.start2 || "", day.end2 || "",
-            day.absent ? "" : formatHours(day.totalHours), day.overtimeHours ? formatHours(day.overtimeHours) : "",
+            formatDayTotalHours(day), day.overtimeHours ? formatHours(day.overtimeHours) : "",
             day.cumulativeOvertime ? formatHours(day.cumulativeOvertime) : "", note
           ]);
           styles.push(headers.map((_, columnIndex) => {
             if (noInspectionTime) return absentStyle;
             if (columnIndex === 14) {
               if (day.absent) return warnStyle;
-              if (day.holidayOvertime || day.weekendOvertime || day.short || adjustOvertime) return redStyle;
+              if (day.missingEndPunch || day.holidayOvertime || day.weekendOvertime || day.short || adjustOvertime) return redStyle;
               return okStyle;
             }
             if (day.absent) return absentStyle;
