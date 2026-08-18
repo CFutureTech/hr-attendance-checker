@@ -1254,6 +1254,15 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           : day.weekendOvertime ? "週末加班" : day.short ? "未滿時數" : "正常";
       return overLimit && baseStatus === "正常" ? "正常；月加班超過上限" : baseStatus;
     }
+
+    function isCalendarRestDay(day) {
+      return Boolean(day.holiday) || Boolean(day.date && [0, 6].includes(day.date.getDay()));
+    }
+
+    function withHolidayFill(style) {
+      return { ...style, fill: { fgColor: { rgb: "FAFBFC" } } };
+    }
+
     exportButton.addEventListener("click", () => {
       const report = getReport();
       const headers = ["日期", "星期", "班別", "狀態", "班別起始", "班別結束", "上班1", "下班1", "上班2", "下班2", "合計小時", "加班時數", "月加班累計", "備註"];
@@ -1276,16 +1285,9 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
         ...normalStyle,
         font: { color: { rgb: "C62828" }, bold: true }
       };
-      const absentStyle = {
-        ...normalStyle,
-        font: { color: { rgb: "7D8794" } },
-        fill: { fgColor: { rgb: "FAFBFC" } }
-      };
-
-      const warnStyle = {
+      const statusWarnStyle = {
         ...normalStyle,
         font: { color: { rgb: "B26A00" }, bold: true },
-        fill: { fgColor: { rgb: "FFF4D6" } }
       };
       const okStyle = {
         ...normalStyle,
@@ -1325,15 +1327,15 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           ]);
 
           styles.push(headers.map((_, columnIndex) => {
+            const statusStyle = day.absent
+              ? statusWarnStyle
+              : day.missingEndPunch || day.holidayOvertime || day.weekendOvertime || day.short || overLimitAfterThisDay
+                ? redStyle
+                : okStyle;
             if (columnIndex === 3) {
-              if (day.absent) return warnStyle;
-              if (day.missingEndPunch || day.holidayOvertime || day.weekendOvertime || day.short || overLimitAfterThisDay) return redStyle;
-              return okStyle;
+              return isCalendarRestDay(day) ? withHolidayFill(statusStyle) : statusStyle;
             }
-            if (day.absent) return absentStyle;
-            if (day.short && [10, 11, 12, 13].includes(columnIndex)) return redStyle;
-            if (overLimitAfterThisDay && [11, 12, 13].includes(columnIndex)) return redStyle;
-            return normalStyle;
+            return isCalendarRestDay(day) ? withHolidayFill(normalStyle) : normalStyle;
           }));
         });
 
@@ -1423,6 +1425,8 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       if (day.absent) return "未上班 / 休假";
       if (!inspectionStart) return "上班未打卡";
       if (!inspectionEnd) return "下班未打卡";
+      if (day.holiday) return day.holiday.type === "typhoon" ? "颱風假加班" : "國定假日加班";
+      if (day.date && [0, 6].includes(day.date.getDay())) return "週六、週日加班";
       const shiftStart = parseClockMinutes(day.shift?.start);
       const shiftEnd = parseClockMinutes(day.shift?.end);
       const late = shiftStart !== null && parseClockMinutes(inspectionStart) > shiftStart;
@@ -1430,6 +1434,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       if (late && early) return "遲到／早退";
       if (late) return "遲到";
       if (early) return "早退";
+      if (day.short) return "未滿時數";
       return "正常";
     }
 
@@ -1447,9 +1452,8 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       const normalStyle = { border: thinBorder(), alignment: { vertical: "center" } };
       const infoStyle = { font: { bold: true, color: { rgb: "1F2937" } }, alignment: { horizontal: "left", vertical: "center", wrapText: true } };
       const redStyle = { ...normalStyle, font: { color: { rgb: "C62828" }, bold: true } };
-      const warnStyle = { ...normalStyle, font: { color: { rgb: "B26A00" }, bold: true }, fill: { fgColor: { rgb: "FFF4D6" } } };
+      const statusWarnStyle = { ...normalStyle, font: { color: { rgb: "B26A00" }, bold: true } };
       const okStyle = { ...normalStyle, font: { color: { rgb: "2E7D32" }, bold: true }, fill: { fgColor: { rgb: "EAF6EC" } } };
-      const absentStyle = { ...normalStyle, font: { color: { rgb: "7D8794" } }, fill: { fgColor: { rgb: "FAFBFC" } } };
       const workbook = XLSX.utils.book_new();
       const usedSheetNames = new Set();
 
@@ -1471,7 +1475,6 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           const inspectionStart = adjustOvertime && isRestDay ? "" : getInspectionStartTime(day);
           const actualEnd = day.end2 || day.end1 || "";
           const inspectionEnd = day.absent || (adjustOvertime && isRestDay) ? "" : (adjustOvertime ? getAdjustedInspectionEnd(day) : actualEnd);
-          const noInspectionTime = !inspectionStart && !inspectionEnd;
           const checkOvertime = day.absent || adjustOvertime ? 0 : day.overtimeHours;
           if (!day.absent && !adjustOvertime) inspectionCumulative += day.overtimeHours;
           const adjustedEndKey = day.end2 ? "end2" : "end1";
@@ -1482,6 +1485,16 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
           const inspectionStatus = getInspectionStatus(day, inspectionStart, inspectionEnd);
           const note = (day.note || "") + (adjustOvertime ? (isRestDay ? "；超過月加班上限，週末／假日排班建議不列入" : "；超過月加班上限，排班建議已扣除當日加班時數") : "");
           const checkDay = { ...day, cumulativeOvertime: inspectionCumulative, overtimeHours: checkOvertime };
+          const inspectionBaseStyle = day.absent || ["未上班 / 休假", "颱風假", "國定假日"].includes(inspectionStatus)
+            ? statusWarnStyle
+            : inspectionStatus === "正常" ? okStyle : redStyle;
+          const reportBaseStyle = day.absent
+            ? statusWarnStyle
+            : day.missingEndPunch || day.holidayOvertime || day.weekendOvertime || day.short || adjustOvertime || checkDay.cumulativeOvertime > report.overtimeLimit
+              ? redStyle
+              : okStyle;
+          const inspectionStatusStyle = isCalendarRestDay(day) ? withHolidayFill(inspectionBaseStyle) : inspectionBaseStyle;
+          const reportStatusStyle = isCalendarRestDay(day) ? withHolidayFill(reportBaseStyle) : reportBaseStyle;
           rows.push([
             formatDate(day.date), `星期${weekdays[day.date.getDay()]}`, day.shift?.name || "",
             inspectionStatus,
@@ -1495,14 +1508,9 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
             day.cumulativeOvertime ? formatHours(day.cumulativeOvertime) : "", note
           ]);
           styles.push(headers.map((_, columnIndex) => {
-            if (noInspectionTime) return absentStyle;
-            if (columnIndex === 14) {
-              if (day.absent) return warnStyle;
-              if (day.missingEndPunch || day.holidayOvertime || day.weekendOvertime || day.short || adjustOvertime) return redStyle;
-              return okStyle;
-            }
-            if (day.absent) return absentStyle;
-            return normalStyle;
+            if (columnIndex === 3) return inspectionStatusStyle;
+            if (columnIndex === 14) return reportStatusStyle;
+            return isCalendarRestDay(day) ? withHolidayFill(normalStyle) : normalStyle;
           }));
         });
 
