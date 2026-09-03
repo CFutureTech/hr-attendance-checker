@@ -768,10 +768,32 @@
       return Math.max(0, end - start) / 60;
     }
 
-    function getShiftForDay(person, date) {
+    function getAvailableShifts() {
+      return [...shifts, ...defaultShifts.filter((base) => !shifts.some((shift) => shift.name === base.name))];
+    }
+
+    function normalizeImportedShift(value) {
+      return String(value ?? "").trim() === "A班" ? "A班" : "正常班";
+    }
+
+    function getShiftForDay(person, date, row) {
       const key = person.key + "|" + formatDate(date);
       const override = shiftOverrides[key];
-      return shifts.find((shift) => shift.name === override) || shifts[0] || defaultShifts[0];
+      const available = getAvailableShifts();
+      return available.find((shift) => shift.name === override)
+        || available.find((shift) => shift.name === normalizeImportedShift(row?.shiftName));
+    }
+
+    function resetImportedShiftOverrides(rows) {
+      // Re-importing replaces manual assignments only for the imported employee-months.
+      const affected = new Map();
+      rows.forEach((row) => affected.set(row.key + "|" + monthKey(row.date), row));
+      affected.forEach((row) => {
+        datesInMonth(monthKey(row.date)).forEach((date) => {
+          delete shiftOverrides[row.key + "|" + formatDate(date)];
+        });
+      });
+      localStorage.setItem("hr-shift-overrides", JSON.stringify(shiftOverrides));
     }
 
     function calculateShiftOvertime(row, shift) {
@@ -923,6 +945,7 @@
           employeeNo: String(pick(row, ["員工序號", "員工編號", "工號"]) || "").trim(),
           attendanceNo: String(pick(row, ["考勤號碼", "考勤編號", "卡號"]) || "").trim(),
           name: String(pick(row, ["姓名", "員工姓名"]) || "").trim(),
+          shiftName: normalizeImportedShift(pick(row, ["對應時段"])),
           date,
           start1,
           end1,
@@ -973,7 +996,7 @@
         let cumulativeOvertime = 0;
         const days = datesInMonth(month).map((date) => {
           const found = byDate.get(formatDate(date));
-          const shift = getShiftForDay(person, date);
+          const shift = getShiftForDay(person, date, found);
           const missingEndPunch = hasMissingEndPunch(found);
           const countedTotalHours = found && !missingEndPunch ? calculateShiftTotalHours(found, shift) : 0;
           const weekend = [0, 6].includes(date.getDay());
@@ -1118,7 +1141,7 @@
       detailSubtitle.textContent = `員工序號 ${person.employeeNo || "-"} / 考勤號碼 ${person.attendanceNo || "-"}`;
       const monthShiftNames = [...new Set(person.days.map((day) => day.shift?.name).filter(Boolean))];
       const mixedShiftOption = monthShiftNames.length > 1 ? '<option value="">混合班別</option>' : "";
-      monthShiftSelect.innerHTML = mixedShiftOption + shifts.map((shift) => '<option value="' + escapeHtml(shift.name) + '">' + escapeHtml(shift.name) + '</option>').join("");
+      monthShiftSelect.innerHTML = mixedShiftOption + getAvailableShifts().map((shift) => '<option value="' + escapeHtml(shift.name) + '">' + escapeHtml(shift.name) + '</option>').join("");
       monthShiftSelect.value = monthShiftNames.length === 1 ? monthShiftNames[0] : "";
       monthShiftSelect.disabled = false;
       monthShiftSelect.dataset.personKey = person.key;
@@ -1146,8 +1169,8 @@
         `;
       }).join("");
 detailBody.querySelectorAll(".shift-select").forEach((select) => {
-        select.innerHTML = shifts.map((shift) => '<option value="' + escapeHtml(shift.name) + '">' + escapeHtml(shift.name) + '</option>').join("");
-        select.value = select.dataset.shift || shifts[0]?.name || "";
+        select.innerHTML = getAvailableShifts().map((shift) => '<option value="' + escapeHtml(shift.name) + '">' + escapeHtml(shift.name) + '</option>').join("");
+        select.value = select.dataset.shift || "正常班";
         select.addEventListener("change", () => {
           const key = person.key + "|" + select.dataset.date;
           shiftOverrides[key] = select.value;
@@ -1220,6 +1243,7 @@ detailBody.querySelectorAll(".shift-select").forEach((select) => {
       // 從找到的標頭列開始解析 JSON
       const rows = XLSX.utils.sheet_to_json(firstSheet, { range: headerRowIndex, defval: "", raw: true });
       rawRows = normalizeRows(rows);
+      resetImportedShiftOverrides(rawRows);
       selectedEmployeeKey = "";
       updateMonthOptions();
       render();
