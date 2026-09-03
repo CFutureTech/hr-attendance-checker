@@ -114,13 +114,18 @@ test('re-import replaces affected month overrides but permits later manual chang
   assert.equal(c.getReport().people[0].days[0].shift.name, '正常班');
 });
 
-test('custom times are preserved and missing built-in shifts remain selectable', () => {
+test('configured shift names are matched dynamically and missing built-ins remain selectable', () => {
   const { context: c } = harness();
-  c.shifts = [{ name: '正常班', start: '09:00', end: '18:00' }];
-  c.loadWorkbook({ SheetNames: ['data'], Sheets: { data: [input(1, '正常班'), input(2, 'A班')] } });
+  c.shifts = [
+    { name: '正常班', start: '09:00', end: '18:00' },
+    { name: '晚班', start: '14:00', end: '22:00' }
+  ];
+  c.loadWorkbook({ SheetNames: ['data'], Sheets: { data: [input(1, '正常班'), input(2, '晚班'), input(3, '未知班')] } });
   const days = c.getReport().people[0].days;
   assert.equal(days[0].shift.start, '09:00');
-  assert.equal(days[1].shift.end, '16:00');
+  assert.equal(days[1].shift.name, '晚班');
+  assert.equal(days[1].shift.end, '22:00');
+  assert.equal(days[2].shift.name, '正常班');
   assert.ok(c.getAvailableShifts().some((s) => s.name === 'A班'));
 });
 

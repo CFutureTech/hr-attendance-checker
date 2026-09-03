@@ -773,7 +773,9 @@
     }
 
     function normalizeImportedShift(value) {
-      return String(value ?? "").trim() === "A班" ? "A班" : "正常班";
+      const importedName = String(value ?? "").trim();
+      const matched = getAvailableShifts().find((shift) => shift.name === importedName);
+      return matched?.name || "正常班";
     }
 
     function getShiftForDay(person, date, row) {
