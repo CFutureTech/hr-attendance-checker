@@ -91,6 +91,8 @@ test('import mapping drives report calculations and both export shift columns', 
   callbacks.A();
   for (const book of exports) {
     const sheet = book.sheets[0];
+    assert.equal(sheet['0:2'].v, '考勤號碼：');
+    assert.equal(sheet['0:4'].v, '員工序號：T1');
     assert.equal(sheet['1:2'].v, '班別');
     expected.forEach((name, i) => assert.equal(sheet[`${i + 2}:2`].v, name));
   }
